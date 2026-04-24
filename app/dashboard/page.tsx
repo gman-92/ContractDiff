@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { UploadZone } from '@/components/UploadZone';
@@ -11,16 +11,42 @@ export default function DashboardPage() {
   const [fileB, setFileB] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const tokenRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const { createBrowserClient } = await import('@/lib/supabase');
+      const supabase = createBrowserClient();
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!mounted) return;
+
+      if (!session) {
+        router.replace('/auth');
+        return;
+      }
+      tokenRef.current = session.access_token;
+
+      // Keep token fresh when Supabase refreshes it
+      supabase.auth.onAuthStateChange((_event, s) => {
+        tokenRef.current = s?.access_token ?? null;
+        if (!s) router.replace('/auth');
+      });
+    })();
+    return () => { mounted = false; };
+  }, [router]);
 
   const handleCompare = useCallback(async () => {
     if (!fileA || !fileB) return;
     setError('');
     setLoading(true);
     try {
-      const { createBrowserClient } = await import('@/lib/supabase');
-      const supabase = createBrowserClient();
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
+      const token = tokenRef.current;
+      if (!token) {
+        router.replace('/auth');
+        return;
+      }
 
       const form = new FormData();
       form.append('contractA', fileA);
@@ -28,7 +54,7 @@ export default function DashboardPage() {
       const res = await fetch('/api/analyze', {
         method: 'POST',
         body: form,
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json() as { id?: string; error?: string };
       if (!res.ok) throw new Error(data.error ?? 'Analysis failed');
