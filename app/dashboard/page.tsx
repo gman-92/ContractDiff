@@ -17,10 +17,19 @@ export default function DashboardPage() {
     setError('');
     setLoading(true);
     try {
+      const { createBrowserClient } = await import('@/lib/supabase');
+      const supabase = createBrowserClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
       const form = new FormData();
       form.append('contractA', fileA);
       form.append('contractB', fileB);
-      const res = await fetch('/api/analyze', { method: 'POST', body: form });
+      const res = await fetch('/api/analyze', {
+        method: 'POST',
+        body: form,
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
       const data = await res.json() as { id?: string; error?: string };
       if (!res.ok) throw new Error(data.error ?? 'Analysis failed');
       router.push(`/compare/${data.id}`);
