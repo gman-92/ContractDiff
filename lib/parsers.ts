@@ -45,10 +45,15 @@ function normalizeText(raw: string): string {
 
 export async function extractTextFromPDF(buffer: Buffer): Promise<string> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const mod = await import('pdf-parse') as any;
-  const pdfParse = (mod.default ?? mod) as (buf: Buffer) => Promise<{ text: string }>;
-  const { text } = await pdfParse(buffer);
-  return normalizeText(text);
+  const { default: PDFParser } = await import('pdf2json') as any;
+  return new Promise((resolve, reject) => {
+    const parser = new PDFParser();
+    parser.on('pdfParser_dataError', (e: unknown) => reject(e));
+    parser.on('pdfParser_dataReady', () => {
+      resolve(normalizeText(parser.getRawTextContent() as string));
+    });
+    parser.parseBuffer(buffer);
+  });
 }
 
 export async function extractTextFromDOCX(buffer: Buffer): Promise<string> {
