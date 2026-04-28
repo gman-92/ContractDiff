@@ -57,7 +57,9 @@ export default function DashboardPage() {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json() as { id?: string; error?: string };
+      console.log('[dashboard] analyze response:', res.status, JSON.stringify({ id: data.id, error: data.error }));
       if (!res.ok) throw new Error(data.error ?? 'Analysis failed');
+      if (!data.id) throw new Error(`No comparison ID returned (status ${res.status})`);
       router.push(`/compare/${data.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong');

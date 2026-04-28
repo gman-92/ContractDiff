@@ -20,8 +20,14 @@ export default async function ComparePage({
   if (error || !data) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-stone-500 mb-4">Comparison not found.</p>
+        <div className="text-center max-w-md px-4">
+          <p className="text-stone-800 font-medium mb-2">Comparison not found.</p>
+          <p className="text-stone-500 text-sm mb-1">ID: {id}</p>
+          {error && (
+            <p className="text-red-600 text-sm mb-4 font-mono break-all">
+              Supabase error: {error.message} (code: {error.code})
+            </p>
+          )}
           <Link href="/dashboard" className="text-stone-900 font-medium hover:underline">
             ← Back to dashboard
           </Link>
