@@ -1,32 +1,75 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { createServiceRoleClient } from '@/lib/supabase.server';
 import { DiffReport } from '@/components/DiffReport';
 import { ExportButton } from '@/components/ExportButton';
 import { TextDiff } from '@/components/TextDiff';
 
-export default async function ComparePage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
-  const { id } = await params;
-  const supabase = createServiceRoleClient();
-  const { data, error } = await supabase
-    .from('comparisons')
-    .select('*')
-    .eq('id', id)
-    .single();
+interface ComparisonRow {
+  id: string;
+  contract_a_name?: string;
+  contract_b_name?: string;
+  result_json: Record<string, unknown>;
+  created_at: string;
+}
 
-  if (error || !data) {
+export default function ComparePage() {
+  const { id } = useParams<{ id: string }>();
+  const [comparison, setComparison] = useState<ComparisonRow | null>(null);
+  const [fetchError, setFetchError] = useState('');
+
+  useEffect(() => {
+    if (!id) return;
+
+    // Try sessionStorage first (populated immediately after analysis)
+    const cached = sessionStorage.getItem(`comparison-${id}`);
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached) as Record<string, unknown>;
+        setComparison({
+          id,
+          contract_a_name: parsed._name_a as string | undefined,
+          contract_b_name: parsed._name_b as string | undefined,
+          result_json: parsed,
+          created_at: new Date().toISOString(),
+        });
+        return;
+      } catch {
+        // fall through to fetch
+      }
+    }
+
+    // Fall back to fetching from Supabase via API route
+    fetch(`/api/comparison/${id}`)
+      .then(async (r) => {
+        const json = await r.json() as ComparisonRow & { error?: string; code?: string };
+        if (!r.ok) {
+          setFetchError(`${json.error ?? 'Not found'}${json.code ? ` (${json.code})` : ''}`);
+        } else {
+          setComparison(json);
+        }
+      })
+      .catch((e: Error) => setFetchError(e.message));
+  }, [id]);
+
+  if (!comparison && !fetchError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <p className="text-stone-400 text-sm animate-pulse">Loading comparison…</p>
+      </div>
+    );
+  }
+
+  if (fetchError || !comparison) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center max-w-md px-4">
           <p className="text-stone-800 font-medium mb-2">Comparison not found.</p>
-          <p className="text-stone-500 text-sm mb-1">ID: {id}</p>
-          {error && (
-            <p className="text-red-600 text-sm mb-4 font-mono break-all">
-              Supabase error: {error.message} (code: {error.code})
-            </p>
+          <p className="text-stone-500 text-sm mb-1 font-mono">ID: {id}</p>
+          {fetchError && (
+            <p className="text-red-600 text-sm mb-4 font-mono break-all">{fetchError}</p>
           )}
           <Link href="/dashboard" className="text-stone-900 font-medium hover:underline">
             ← Back to dashboard
@@ -36,18 +79,12 @@ export default async function ComparePage({
     );
   }
 
-  const comparison = data as {
-    id: string;
-    contract_a_name?: string;
-    contract_b_name?: string;
-    result_json: Record<string, unknown>;
-    created_at: string;
-  };
-
-  const { _text_a, _text_b, ...aiFields } = comparison.result_json;
+  const { _text_a, _text_b, _name_a, _name_b, ...aiFields } = comparison.result_json;
   const reportData = aiFields as Parameters<typeof DiffReport>[0]['data'];
   const textA = (_text_a as string) ?? '';
   const textB = (_text_b as string) ?? '';
+  const labelA = (comparison.contract_a_name ?? _name_a as string) ?? 'Contract A';
+  const labelB = (comparison.contract_b_name ?? _name_b as string) ?? 'Contract B';
 
   return (
     <div className="min-h-screen bg-stone-50">
@@ -58,10 +95,7 @@ export default async function ComparePage({
           </Link>
           <div className="flex items-center gap-3">
             <ExportButton data={reportData} />
-            <Link
-              href="/dashboard"
-              className="text-sm text-stone-500 hover:text-stone-900 transition-colors"
-            >
+            <Link href="/dashboard" className="text-sm text-stone-500 hover:text-stone-900 transition-colors">
               ← New comparison
             </Link>
           </div>
@@ -74,20 +108,14 @@ export default async function ComparePage({
             Comparison Report
           </h1>
           <p className="text-stone-500 text-sm">
-            {comparison.contract_a_name ?? 'Contract A'} vs {comparison.contract_b_name ?? 'Contract B'} ·{' '}
-            {new Date(comparison.created_at).toLocaleDateString()}
+            {labelA} vs {labelB} · {new Date(comparison.created_at).toLocaleDateString()}
           </p>
         </div>
 
         <DiffReport data={reportData} />
 
         <div className="mt-8">
-          <TextDiff
-            textA={textA}
-            textB={textB}
-            labelA={comparison.contract_a_name ?? 'Contract A'}
-            labelB={comparison.contract_b_name ?? 'Contract B'}
-          />
+          <TextDiff textA={textA} textB={textB} labelA={labelA} labelB={labelB} />
         </div>
       </main>
     </div>

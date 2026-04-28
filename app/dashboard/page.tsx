@@ -56,10 +56,19 @@ export default function DashboardPage() {
         body: form,
         headers: { Authorization: `Bearer ${token}` },
       });
-      const data = await res.json() as { id?: string; error?: string };
-      console.log('[dashboard] analyze response:', res.status, JSON.stringify({ id: data.id, error: data.error }));
+      const data = await res.json() as { id?: string; error?: string; result?: Record<string, unknown> };
       if (!res.ok) throw new Error(data.error ?? 'Analysis failed');
-      if (!data.id) throw new Error(`No comparison ID returned (status ${res.status})`);
+      if (!data.id) throw new Error('No comparison ID returned — check Vercel function logs');
+      // Store result in sessionStorage so the compare page can render immediately
+      // without depending on a Supabase read succeeding
+      if (data.result) {
+        const payload = {
+          ...data.result,
+          _name_a: fileA.name,
+          _name_b: fileB.name,
+        };
+        sessionStorage.setItem(`comparison-${data.id}`, JSON.stringify(payload));
+      }
       router.push(`/compare/${data.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
