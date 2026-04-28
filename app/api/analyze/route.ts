@@ -92,7 +92,7 @@ export async function POST(request: NextRequest) {
     const contractAUrl = uploadA.data?.path ?? pathA;
     const contractBUrl = uploadB.data?.path ?? pathB;
 
-    const { data: comparison } = await serviceClient
+    const { data: comparison, error: insertError } = await serviceClient
       .from('comparisons')
       .insert({
         user_id: user.id,
@@ -104,6 +104,14 @@ export async function POST(request: NextRequest) {
       })
       .select('id')
       .single();
+
+    if (insertError || !comparison?.id) {
+      console.error('[analyze] comparison insert error:', insertError);
+      return Response.json(
+        { error: `Failed to save comparison: ${insertError?.message ?? 'no id returned'}` },
+        { status: 500 }
+      );
+    }
 
     await serviceClient
       .from('profiles')
