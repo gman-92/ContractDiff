@@ -46,14 +46,67 @@ function normalizeText(raw: string): string {
 export async function extractTextFromPDF(buffer: Buffer): Promise<string> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { default: PDFParser } = await import('pdf2json') as any;
-  return new Promise((resolve, reject) => {
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const pdfData = await new Promise<any>((resolve, reject) => {
     const parser = new PDFParser();
-    parser.on('pdfParser_dataError', (e: unknown) => reject(e));
-    parser.on('pdfParser_dataReady', () => {
-      resolve(normalizeText(parser.getRawTextContent() as string));
-    });
+    parser.on('pdfParser_dataError', reject);
+    parser.on('pdfParser_dataReady', resolve);
     parser.parseBuffer(buffer);
   });
+
+  const pageTexts: string[] = [];
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  for (const page of pdfData.Pages as any[]) {
+    // Build a flat list of {x, y, text} sorted top-to-bottom, left-to-right
+    const items: { x: number; y: number; text: string }[] = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (const t of page.Texts as any[]) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const text = (t.R as any[]).map((r) => decodeURIComponent(r.T as string)).join('');
+      if (text.trim()) items.push({ x: t.x as number, y: t.y as number, text });
+    }
+    items.sort((a, b) => (Math.abs(a.y - b.y) > 0.2 ? a.y - b.y : a.x - b.x));
+
+    if (items.length === 0) continue;
+
+    const lines: string[] = [];
+    let currentLine = items[0].text;
+    let lastY = items[0].y;
+    let lastX = items[0].x;
+    let lastLen = items[0].text.length;
+
+    for (let i = 1; i < items.length; i++) {
+      const item = items[i];
+      if (Math.abs(item.y - lastY) > 0.2) {
+        if (currentLine.trim()) lines.push(currentLine.trim());
+        currentLine = item.text;
+        lastY = item.y;
+        lastX = item.x;
+        lastLen = item.text.length;
+      } else {
+        // Same line — insert a space if there is a visible gap between items
+        const gap = item.x - (lastX + lastLen * 0.2);
+        if (gap > 0.5 && !currentLine.endsWith(' ')) currentLine += ' ';
+        currentLine += item.text;
+        lastX = item.x;
+        lastLen = item.text.length;
+      }
+    }
+    if (currentLine.trim()) lines.push(currentLine.trim());
+
+    // Join lines that end mid-sentence with a space instead of a newline
+    const joined = lines.reduce<string>((acc, line, idx) => {
+      if (idx === 0) return line;
+      const prev = acc.trimEnd();
+      return /[.,:;!?]$/.test(prev) ? `${prev}\n${line}` : `${prev} ${line}`;
+    }, '');
+
+    pageTexts.push(joined);
+  }
+
+  return normalizeText(pageTexts.join('\n'));
 }
 
 export async function extractTextFromDOCX(buffer: Buffer): Promise<string> {

@@ -107,9 +107,12 @@ For each numbered change, decide:
     whitespace, punctuation style, hyphenation, capitalisation of common nouns,
     section-number style ("1." vs "1)"), ligatures (fi/fl), soft hyphens, line-wrap differences.
 (b) LEGAL CHANGE — a different obligation, right, monetary amount, date, party name,
-    deadline, or term that a lawyer would flag in a redline.
+    deadline, term, or clause that a lawyer would flag in a redline.
 
-Your rules:
+Critical rules:
+- If one contract has "(text absent here)" and the other has ANY real words, that is
+  ALWAYS a type (b) LEGAL CHANGE — a clause was added or removed. Never classify
+  added or removed clauses as artifacts, regardless of what the text says.
 - Add a change to material_differences ONLY if it is type (b).
 - If EVERY change is type (a), return an empty material_differences array and state
   in the summary that the contracts are substantively identical.
