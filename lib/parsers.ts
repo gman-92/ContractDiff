@@ -76,29 +76,20 @@ export async function extractTextFromPDF(buffer: Buffer): Promise<string> {
         items.sort((a, b) => (Math.abs(a.y - b.y) > 0.2 ? a.y - b.y : a.x - b.x));
         if (items.length === 0) continue;
 
-        const lines: string[] = [];
-        let currentLine = items[0].text;
-        let lastY = items[0].y;
-        let lastX = items[0].x;
-        let lastLen = items[0].text.length;
-
-        for (let i = 1; i < items.length; i++) {
-          const item = items[i];
-          if (Math.abs(item.y - lastY) > 0.2) {
-            if (currentLine.trim()) lines.push(currentLine.trim());
-            currentLine = item.text;
-            lastY = item.y;
-            lastX = item.x;
-            lastLen = item.text.length;
-          } else {
-            const gap = item.x - (lastX + lastLen * 0.2);
-            if (gap > 0.5 && !currentLine.endsWith(' ')) currentLine += ' ';
-            currentLine += item.text;
-            lastX = item.x;
-            lastLen = item.text.length;
-          }
+        // Group items into lines by Y position, then join each line.
+        // Do NOT add extra spaces — each item's text already contains its own
+        // trailing/leading whitespace from the PDF; injecting more causes
+        // "G aryMang" type artifacts when a word is split across two runs.
+        const lineMap = new Map<number, string>();
+        for (const item of items) {
+          // Round Y to 1 decimal to group items on the same visual line
+          const yKey = Math.round(item.y * 5) / 5;
+          lineMap.set(yKey, (lineMap.get(yKey) ?? '') + item.text);
         }
-        if (currentLine.trim()) lines.push(currentLine.trim());
+        const lines = Array.from(lineMap.entries())
+          .sort((a, b) => a[0] - b[0])
+          .map(([, text]) => text.trim())
+          .filter(Boolean);
 
         const joined = lines.reduce<string>((acc, line, idx) => {
           if (idx === 0) return line;
