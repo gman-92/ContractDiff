@@ -107,14 +107,42 @@ export async function extractTextFromPDF(buffer: Buffer): Promise<string> {
 
   // Fallback: getRawTextContent (simpler but works for most PDFs)
   const raw: string = parser.getRawTextContent();
-  return normalizeText(raw.replace(/\f/g, '\n'));
+  // Also append AcroForm field values — fillable PDF form fields store their
+  // content outside the page content stream and getRawTextContent() misses them.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const fields: any[] = parser.getAllFieldData?.() ?? [];
+  const fieldText = fields
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .filter((f: any) => f.fieldValue && String(f.fieldValue).trim())
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .map((f: any) => `${f.fieldName ?? ''}: ${f.fieldValue}`)
+    .join('\n');
+
+  return normalizeText(raw.replace(/\f/g, '\n') + (fieldText ? '\n' + fieldText : ''));
 }
 
 export async function extractTextFromDOCX(buffer: Buffer): Promise<string> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mammoth = (await import('mammoth')) as any;
-  const result = await mammoth.extractRawText({ buffer });
-  return normalizeText(result.value as string);
+
+  // convertToHtml captures content controls / structured document tags that
+  // extractRawText sometimes misses (e.g. fillable form fields in Word templates)
+  const result = await mammoth.convertToHtml({ buffer });
+  const html: string = result.value;
+
+  // Strip all HTML tags and decode basic entities → plain text
+  const text = html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n')
+    .replace(/<\/li>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)));
+
+  return normalizeText(text);
 }
 
 export function splitIntoSections(text: string, chunkSize = 20000): string[] {
