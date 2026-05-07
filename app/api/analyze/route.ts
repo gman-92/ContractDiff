@@ -19,8 +19,7 @@ function getImageMime(file: File): string | null {
   return ext ? (map[ext] ?? null) : null;
 }
 
-async function extractText(file: File): Promise<string> {
-  const buffer = Buffer.from(await file.arrayBuffer());
+async function extractText(file: File, buffer: Buffer): Promise<string> {
 
   // Image files (scanned contract photos) → Claude vision OCR directly
   const imageMime = getImageMime(file);
@@ -98,17 +97,26 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: 'Two contract files are required.' }, { status: 400 });
     }
 
-    const [cleanA, cleanB] = await Promise.all([
-      extractText(fileA),
-      extractText(fileB),
+    // Read file buffers once — File.arrayBuffer() may not be re-readable
+    console.log('[analyze] reading file buffers');
+    const [bufferA, bufferB] = await Promise.all([
+      fileA.arrayBuffer().then(Buffer.from),
+      fileB.arrayBuffer().then(Buffer.from),
     ]);
+    console.log('[analyze] buffers read — A:', bufferA.length, 'B:', bufferB.length);
+
+    console.log('[analyze] extracting text from A:', fileA.name);
+    const cleanA = await extractText(fileA, bufferA);
+    console.log('[analyze] extracting text from B:', fileB.name);
+    const cleanB = await extractText(fileB, bufferB);
 
     console.log('[parsers] Contract A cleaned text (first 500 chars):', cleanA.slice(0, 500));
     console.log('[parsers] Contract B cleaned text (first 500 chars):', cleanB.slice(0, 500));
     console.log('[parsers] Contract A length:', cleanA.length, '| Contract B length:', cleanB.length);
 
-
+    console.log('[analyze] calling compareContracts');
     const aiResult = await compareContracts(cleanA, cleanB);
+    console.log('[analyze] compareContracts done');
     // Attach cleaned texts so the compare page can render a direct word diff
     const result = { ...aiResult, _text_a: cleanA, _text_b: cleanB };
 
@@ -117,13 +125,12 @@ export async function POST(request: NextRequest) {
     const pathA = `${user.id}/${timestamp}-A-${fileA.name}`;
     const pathB = `${user.id}/${timestamp}-B-${fileB.name}`;
 
-    const bufferA = Buffer.from(await fileA.arrayBuffer());
-    const bufferB = Buffer.from(await fileB.arrayBuffer());
-
+    console.log('[analyze] uploading to storage');
     const [uploadA, uploadB] = await Promise.all([
       serviceClient.storage.from('contracts').upload(pathA, bufferA, { contentType: fileA.type }),
       serviceClient.storage.from('contracts').upload(pathB, bufferB, { contentType: fileB.type }),
     ]);
+    console.log('[analyze] storage upload done');
 
     const contractAUrl = uploadA.data?.path ?? pathA;
     const contractBUrl = uploadB.data?.path ?? pathB;
