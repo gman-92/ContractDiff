@@ -72,6 +72,19 @@ export async function POST(request: NextRequest) {
     console.log('[parsers] Contract B cleaned text (first 500 chars):', cleanB.slice(0, 500));
     console.log('[parsers] Contract A length:', cleanA.length, '| Contract B length:', cleanB.length);
 
+    if (cleanA.length < 50) {
+      return Response.json(
+        { error: 'Contract A appears to be a scanned (image-only) PDF. Please upload a text-based PDF or a Word (DOCX) file instead.' },
+        { status: 422 }
+      );
+    }
+    if (cleanB.length < 50) {
+      return Response.json(
+        { error: 'Contract B appears to be a scanned (image-only) PDF. Please upload a text-based PDF or a Word (DOCX) file instead.' },
+        { status: 422 }
+      );
+    }
+
     const aiResult = await compareContracts(cleanA, cleanB);
     // Attach cleaned texts so the compare page can render a direct word diff
     const result = { ...aiResult, _text_a: cleanA, _text_b: cleanB };
