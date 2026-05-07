@@ -4,6 +4,37 @@ import { splitIntoSections } from './parsers';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+// ── OCR ───────────────────────────────────────────────────────────────────────
+
+/**
+ * Send a scanned/image-only PDF to Claude and extract its text via vision.
+ * Only called when normal text extraction returns < 50 characters.
+ */
+export async function ocrPDFWithClaude(buffer: Buffer): Promise<string> {
+  const base64 = buffer.toString('base64');
+  const response = await client.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 4096,
+    messages: [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'document',
+            source: { type: 'base64', media_type: 'application/pdf', data: base64 },
+          } as never,
+          {
+            type: 'text',
+            text: 'Extract every word of text from this document exactly as written. Include all headings, labels, values, and body text. Output only the raw extracted text — no commentary, no markdown.',
+          },
+        ],
+      },
+    ],
+  });
+  const block = response.content[0];
+  return block.type === 'text' ? block.text.trim() : '';
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface ChangeRegion {

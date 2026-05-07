@@ -1,14 +1,19 @@
 import { NextRequest } from 'next/server';
 import { createServerClient, createServiceRoleClient } from '@/lib/supabase.server';
 import { extractTextFromPDF, extractTextFromDOCX } from '@/lib/parsers';
-import { compareContracts } from '@/lib/claude';
+import { compareContracts, ocrPDFWithClaude } from '@/lib/claude';
 
 export const maxDuration = 60;
 
 async function extractText(file: File): Promise<string> {
   const buffer = Buffer.from(await file.arrayBuffer());
   if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
-    return extractTextFromPDF(buffer);
+    const text = await extractTextFromPDF(buffer);
+    if (text.length < 50) {
+      console.log('[analyze] PDF appears scanned, falling back to Claude OCR:', file.name);
+      return ocrPDFWithClaude(buffer);
+    }
+    return text;
   }
   if (
     file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
@@ -72,18 +77,6 @@ export async function POST(request: NextRequest) {
     console.log('[parsers] Contract B cleaned text (first 500 chars):', cleanB.slice(0, 500));
     console.log('[parsers] Contract A length:', cleanA.length, '| Contract B length:', cleanB.length);
 
-    if (cleanA.length < 50) {
-      return Response.json(
-        { error: 'Contract A appears to be a scanned (image-only) PDF. Please upload a text-based PDF or a Word (DOCX) file instead.' },
-        { status: 422 }
-      );
-    }
-    if (cleanB.length < 50) {
-      return Response.json(
-        { error: 'Contract B appears to be a scanned (image-only) PDF. Please upload a text-based PDF or a Word (DOCX) file instead.' },
-        { status: 422 }
-      );
-    }
 
     const aiResult = await compareContracts(cleanA, cleanB);
     // Attach cleaned texts so the compare page can render a direct word diff
