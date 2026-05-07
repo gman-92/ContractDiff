@@ -29,11 +29,14 @@ async function extractText(file: File): Promise<string> {
     return ocrWithClaude(buffer, imageMime as Parameters<typeof ocrWithClaude>[1]);
   }
 
-  // PDF: try text extraction first; fall back to Claude OCR if sparse
+  // PDF: try text extraction first; fall back to Claude OCR if sparse.
+  // We count real words (3+ letter sequences) rather than raw chars because
+  // scanned PDFs often contain metadata/form-feed chars that inflate char count.
   if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
     const text = await extractTextFromPDF(buffer);
-    // < 200 chars usually means a scanned / image-only PDF
-    if (text.length < 200) {
+    const wordCount = (text.match(/[a-zA-Z]{3,}/g) ?? []).length;
+    console.log('[analyze] PDF extracted', text.length, 'chars,', wordCount, 'words:', file.name);
+    if (wordCount < 40) {
       console.log('[analyze] PDF appears scanned, using Claude OCR:', file.name);
       return ocrWithClaude(buffer, 'application/pdf');
     }
