@@ -6,31 +6,39 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 // ── OCR ───────────────────────────────────────────────────────────────────────
 
+type OcrMimeType = 'application/pdf' | 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif' | 'image/tiff';
+
 /**
- * Send a scanned/image-only PDF to Claude and extract its text via vision.
- * Only called when normal text extraction returns < 50 characters.
+ * Use Claude vision to extract text from a scanned PDF or image file.
+ * Handles printed text, stamps, and handwriting.
  */
-export async function ocrPDFWithClaude(buffer: Buffer): Promise<string> {
+export async function ocrWithClaude(buffer: Buffer, mimeType: OcrMimeType): Promise<string> {
   const base64 = buffer.toString('base64');
+
+  const contentItem = mimeType === 'application/pdf'
+    ? { type: 'document', source: { type: 'base64', media_type: mimeType, data: base64 } }
+    : { type: 'image',    source: { type: 'base64', media_type: mimeType, data: base64 } };
+
   const response = await client.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 4096,
+    max_tokens: 8096,
     messages: [
       {
         role: 'user',
         content: [
-          {
-            type: 'document',
-            source: { type: 'base64', media_type: 'application/pdf', data: base64 },
-          } as never,
+          contentItem as never,
           {
             type: 'text',
-            text: 'Extract every word of text from this document exactly as written. Include all headings, labels, values, and body text. Output only the raw extracted text — no commentary, no markdown.',
+            text: `Extract ALL text from this document exactly as written.
+Include: headings, field labels, field values, body paragraphs, dates, amounts, signatures, initials, stamps, and any handwritten annotations.
+For handwritten text: transcribe as accurately as possible; mark uncertain words with [?].
+Output only the raw extracted text in reading order — no commentary, no markdown formatting.`,
           },
         ],
       },
     ],
   });
+
   const block = response.content[0];
   return block.type === 'text' ? block.text.trim() : '';
 }

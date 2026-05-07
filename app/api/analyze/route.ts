@@ -1,27 +1,54 @@
 import { NextRequest } from 'next/server';
 import { createServerClient, createServiceRoleClient } from '@/lib/supabase.server';
 import { extractTextFromPDF, extractTextFromDOCX } from '@/lib/parsers';
-import { compareContracts, ocrPDFWithClaude } from '@/lib/claude';
+import { compareContracts, ocrWithClaude } from '@/lib/claude';
 
-export const maxDuration = 60;
+export const maxDuration = 120;
+
+const IMAGE_MIME_TYPES = new Set([
+  'image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif', 'image/tiff',
+]);
+
+function getImageMime(file: File): string | null {
+  if (IMAGE_MIME_TYPES.has(file.type)) return file.type;
+  const ext = file.name.split('.').pop()?.toLowerCase();
+  const map: Record<string, string> = {
+    jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
+    webp: 'image/webp', gif: 'image/gif', tiff: 'image/tiff', tif: 'image/tiff',
+  };
+  return ext ? (map[ext] ?? null) : null;
+}
 
 async function extractText(file: File): Promise<string> {
   const buffer = Buffer.from(await file.arrayBuffer());
+
+  // Image files (scanned contract photos) → Claude vision OCR directly
+  const imageMime = getImageMime(file);
+  if (imageMime) {
+    console.log('[analyze] Image file — using Claude OCR:', file.name);
+    return ocrWithClaude(buffer, imageMime as Parameters<typeof ocrWithClaude>[1]);
+  }
+
+  // PDF: try text extraction first; fall back to Claude OCR if sparse
   if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
     const text = await extractTextFromPDF(buffer);
-    if (text.length < 50) {
-      console.log('[analyze] PDF appears scanned, falling back to Claude OCR:', file.name);
-      return ocrPDFWithClaude(buffer);
+    // < 200 chars usually means a scanned / image-only PDF
+    if (text.length < 200) {
+      console.log('[analyze] PDF appears scanned, using Claude OCR:', file.name);
+      return ocrWithClaude(buffer, 'application/pdf');
     }
     return text;
   }
+
+  // DOCX
   if (
     file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
     file.name.endsWith('.docx')
   ) {
     return extractTextFromDOCX(buffer);
   }
-  throw new Error(`Unsupported file type: ${file.type}`);
+
+  throw new Error(`Unsupported file type: ${file.type || file.name}`);
 }
 
 export async function POST(request: NextRequest) {

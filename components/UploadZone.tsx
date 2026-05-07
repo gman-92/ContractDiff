@@ -27,6 +27,10 @@ export function UploadZone({ label, file, onFile }: UploadZoneProps) {
     accept: {
       'application/pdf': ['.pdf'],
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
+      'image/jpeg': ['.jpg', '.jpeg'],
+      'image/png': ['.png'],
+      'image/webp': ['.webp'],
+      'image/tiff': ['.tiff', '.tif'],
     },
     maxFiles: 1,
   });
@@ -53,7 +57,7 @@ export function UploadZone({ label, file, onFile }: UploadZoneProps) {
         <div className="space-y-2">
           <div className="text-3xl text-stone-300">⬆</div>
           <div className="text-sm font-medium text-stone-700">{label}</div>
-          <div className="text-xs text-stone-400">PDF or DOCX · drag & drop or click</div>
+          <div className="text-xs text-stone-400">PDF, DOCX, or image (JPG, PNG, TIFF) · drag & drop or click</div>
         </div>
       )}
     </div>

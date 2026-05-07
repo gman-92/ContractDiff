@@ -132,7 +132,7 @@ export default function DashboardPage() {
         </button>
 
         <p className="mt-4 text-center text-xs text-stone-400">
-          Supports PDF and DOCX files up to 10 MB each
+          Supports PDF, DOCX, JPG, PNG, and TIFF · scanned &amp; handwritten contracts supported · up to 10 MB each
         </p>
       </main>
     </div>
