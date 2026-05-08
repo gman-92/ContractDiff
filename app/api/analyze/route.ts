@@ -3,7 +3,7 @@ import { createServerClient, createServiceRoleClient } from '@/lib/supabase.serv
 import { extractTextFromPDF, extractTextFromDOCX } from '@/lib/parsers';
 import { compareContracts, ocrWithClaude } from '@/lib/claude';
 
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 const IMAGE_MIME_TYPES = new Set([
   'image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif', 'image/tiff',
@@ -105,10 +105,11 @@ export async function POST(request: NextRequest) {
     ]);
     console.log('[analyze] buffers read — A:', bufferA.length, 'B:', bufferB.length);
 
-    console.log('[analyze] extracting text from A:', fileA.name);
-    const cleanA = await extractText(fileA, bufferA);
-    console.log('[analyze] extracting text from B:', fileB.name);
-    const cleanB = await extractText(fileB, bufferB);
+    console.log('[analyze] extracting text (parallel):', fileA.name, '|', fileB.name);
+    const [cleanA, cleanB] = await Promise.all([
+      extractText(fileA, bufferA),
+      extractText(fileB, bufferB),
+    ]);
 
     console.log('[parsers] Contract A cleaned text (first 500 chars):', cleanA.slice(0, 500));
     console.log('[parsers] Contract B cleaned text (first 500 chars):', cleanB.slice(0, 500));
