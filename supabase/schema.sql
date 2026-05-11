@@ -22,6 +22,8 @@ create table if not exists comparisons (
   contract_a_name text,
   contract_b_name text,
   result_json jsonb,
+  status text not null default 'done' check (status in ('pending', 'processing', 'done', 'error')),
+  error_message text,
   created_at timestamptz not null default now()
 );
 

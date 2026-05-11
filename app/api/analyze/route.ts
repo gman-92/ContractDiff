@@ -1,4 +1,4 @@
-import { NextRequest } from 'next/server';
+import { NextRequest, after } from 'next/server';
 import { createServerClient, createServiceRoleClient } from '@/lib/supabase.server';
 import { extractTextFromPDF, extractTextFromDOCX } from '@/lib/parsers';
 import { compareContracts, ocrWithClaude } from '@/lib/claude';
@@ -9,7 +9,7 @@ const IMAGE_MIME_TYPES = new Set([
   'image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif', 'image/tiff',
 ]);
 
-function getImageMime(file: File): string | null {
+function getImageMime(file: { name: string; type: string }): string | null {
   if (IMAGE_MIME_TYPES.has(file.type)) return file.type;
   const ext = file.name.split('.').pop()?.toLowerCase();
   const map: Record<string, string> = {
@@ -19,18 +19,13 @@ function getImageMime(file: File): string | null {
   return ext ? (map[ext] ?? null) : null;
 }
 
-async function extractText(file: File, buffer: Buffer): Promise<string> {
-
-  // Image files (scanned contract photos) → Claude vision OCR directly
+async function extractText(file: { name: string; type: string }, buffer: Buffer): Promise<string> {
   const imageMime = getImageMime(file);
   if (imageMime) {
     console.log('[analyze] Image file — using Claude OCR:', file.name);
     return ocrWithClaude(buffer, imageMime as Parameters<typeof ocrWithClaude>[1]);
   }
 
-  // PDF: try text extraction first; fall back to Claude OCR if sparse.
-  // We count real words (3+ letter sequences) rather than raw chars because
-  // scanned PDFs often contain metadata/form-feed chars that inflate char count.
   if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
     const text = await extractTextFromPDF(buffer);
     const wordCount = (text.match(/[a-zA-Z]{3,}/g) ?? []).length;
@@ -42,7 +37,6 @@ async function extractText(file: File, buffer: Buffer): Promise<string> {
     return text;
   }
 
-  // DOCX
   if (
     file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
     file.name.endsWith('.docx')
@@ -97,72 +91,93 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: 'Two contract files are required.' }, { status: 400 });
     }
 
-    // Read file buffers once — File.arrayBuffer() may not be re-readable
-    console.log('[analyze] reading file buffers');
+    // Read buffers now — the request body won't be accessible after we respond
     const [bufferA, bufferB] = await Promise.all([
       fileA.arrayBuffer().then(Buffer.from),
       fileB.arrayBuffer().then(Buffer.from),
     ]);
-    console.log('[analyze] buffers read — A:', bufferA.length, 'B:', bufferB.length);
 
-    console.log('[analyze] extracting text (parallel):', fileA.name, '|', fileB.name);
-    const [cleanA, cleanB] = await Promise.all([
-      extractText(fileA, bufferA),
-      extractText(fileB, bufferB),
-    ]);
-
-    console.log('[parsers] Contract A cleaned text (first 500 chars):', cleanA.slice(0, 500));
-    console.log('[parsers] Contract B cleaned text (first 500 chars):', cleanB.slice(0, 500));
-    console.log('[parsers] Contract A length:', cleanA.length, '| Contract B length:', cleanB.length);
-
-    console.log('[analyze] calling compareContracts');
-    const aiResult = await compareContracts(cleanA, cleanB);
-    console.log('[analyze] compareContracts done');
-    // Attach cleaned texts so the compare page can render a direct word diff
-    const result = { ...aiResult, _text_a: cleanA, _text_b: cleanB };
-
-    // Upload originals to Supabase Storage
+    const fileAMeta = { name: fileA.name, type: fileA.type };
+    const fileBMeta = { name: fileB.name, type: fileB.type };
     const timestamp = Date.now();
     const pathA = `${user.id}/${timestamp}-A-${fileA.name}`;
     const pathB = `${user.id}/${timestamp}-B-${fileB.name}`;
+    const userId = user.id;
 
-    console.log('[analyze] uploading to storage');
-    const [uploadA, uploadB] = await Promise.all([
-      serviceClient.storage.from('contracts').upload(pathA, bufferA, { contentType: fileA.type }),
-      serviceClient.storage.from('contracts').upload(pathB, bufferB, { contentType: fileB.type }),
-    ]);
-    console.log('[analyze] storage upload done');
-
-    const contractAUrl = uploadA.data?.path ?? pathA;
-    const contractBUrl = uploadB.data?.path ?? pathB;
-
+    // Create the record immediately so the client can navigate to the result page
     const { data: comparison, error: insertError } = await serviceClient
       .from('comparisons')
       .insert({
-        user_id: user.id,
-        contract_a_url: contractAUrl,
-        contract_b_url: contractBUrl,
+        user_id: userId,
+        contract_a_url: pathA,
+        contract_b_url: pathB,
         contract_a_name: fileA.name,
         contract_b_name: fileB.name,
-        result_json: result,
+        status: 'processing',
+        result_json: null,
       })
       .select('id')
       .single();
 
     if (insertError || !comparison?.id) {
-      console.error('[analyze] comparison insert error:', insertError);
+      console.error('[analyze] insert error:', insertError);
       return Response.json(
-        { error: `Failed to save comparison: ${insertError?.message ?? 'no id returned'}` },
+        { error: `Failed to create comparison: ${insertError?.message ?? 'no id returned'}` },
         { status: 500 }
       );
     }
 
+    // Deduct quota immediately so rapid resubmissions can't bypass the limit
     await serviceClient
       .from('profiles')
       .update({ comparisons_used_this_month: (profile?.comparisons_used_this_month ?? 0) + 1 })
-      .eq('id', user.id);
+      .eq('id', userId);
 
-    return Response.json({ id: comparison?.id, result });
+    const comparisonId = comparison.id;
+
+    // All heavy work (OCR + AI comparison) runs after the HTTP response is sent.
+    // Vercel keeps the serverless function alive (up to maxDuration) until this resolves.
+    after(async () => {
+      try {
+        console.log('[analyze:bg] starting — uploads + OCR in parallel');
+
+        // Fire storage uploads immediately; OCR runs concurrently
+        const uploadPromise = Promise.all([
+          serviceClient.storage.from('contracts').upload(pathA, bufferA, { contentType: fileAMeta.type }),
+          serviceClient.storage.from('contracts').upload(pathB, bufferB, { contentType: fileBMeta.type }),
+        ]);
+
+        const [cleanA, cleanB] = await Promise.all([
+          extractText(fileAMeta, bufferA),
+          extractText(fileBMeta, bufferB),
+        ]);
+
+        await uploadPromise;
+
+        console.log('[analyze:bg] comparing contracts');
+        const aiResult = await compareContracts(cleanA, cleanB);
+        const result = { ...(aiResult as object), _text_a: cleanA, _text_b: cleanB };
+
+        await serviceClient
+          .from('comparisons')
+          .update({ result_json: result, status: 'done' })
+          .eq('id', comparisonId);
+
+        console.log('[analyze:bg] done:', comparisonId);
+      } catch (err) {
+        console.error('[analyze:bg] error:', err);
+        await serviceClient
+          .from('comparisons')
+          .update({
+            status: 'error',
+            error_message: err instanceof Error ? err.message : 'Processing failed',
+          })
+          .eq('id', comparisonId);
+      }
+    });
+
+    // Return immediately — the client polls /api/comparison/[id] for the result
+    return Response.json({ id: comparisonId });
   } catch (err) {
     console.error('[analyze] error:', err);
     return Response.json(

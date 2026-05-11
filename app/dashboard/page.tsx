@@ -128,7 +128,7 @@ export default function DashboardPage() {
           disabled={!fileA || !fileB || loading}
           className="w-full bg-stone-900 text-white py-3 rounded-xl font-semibold text-sm hover:bg-stone-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          {loading ? 'Analyzing… this may take 30–60 seconds' : 'Compare contracts →'}
+          {loading ? 'Uploading…' : 'Compare contracts →'}
         </button>
 
         <p className="mt-4 text-center text-xs text-stone-400">
