@@ -21,7 +21,7 @@ export async function ocrWithClaude(buffer: Buffer, mimeType: OcrMimeType): Prom
 
   const response = await client.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 8096,
+    max_tokens: 16000,
     messages: [
       {
         role: 'user',
@@ -225,6 +225,41 @@ async function callClaude(system: string, userContent: string): Promise<object> 
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export async function compareContracts(textA: string, textB: string): Promise<object> {
+  const totalLength = textA.length + textB.length;
+
+  // Skip word-diff for large texts — diffWords is O(n*m) and will hang or crash
+  // on long contracts. Go straight to full-text (or chunked) Claude analysis.
+  if (totalLength > 100_000) {
+    if (totalLength <= 80_000 * 2) {
+      return callClaude(
+        FULL_TEXT_SYSTEM_PROMPT,
+        `CONTRACT A:\n${textA}\n\n---\n\nCONTRACT B:\n${textB}`
+      );
+    }
+    const sectionsA = splitIntoSections(textA);
+    const sectionsB = splitIntoSections(textB);
+    const maxSec = Math.max(sectionsA.length, sectionsB.length);
+    const results = await Promise.all(
+      Array.from({ length: maxSec }, (_, i) =>
+        callClaude(
+          FULL_TEXT_SYSTEM_PROMPT,
+          `CONTRACT A:\n${sectionsA[i] ?? ''}\n\n---\n\nCONTRACT B:\n${sectionsB[i] ?? ''}`
+        )
+      )
+    );
+    const merged = results[0] as Record<string, unknown>;
+    for (let i = 1; i < results.length; i++) {
+      const c = results[i] as Record<string, unknown>;
+      if (Array.isArray(c.material_differences)) {
+        merged.material_differences = [
+          ...((merged.material_differences as unknown[]) ?? []),
+          ...c.material_differences,
+        ];
+      }
+    }
+    return merged;
+  }
+
   const regions = extractChangeRegions(textA, textB);
 
   // Zero meaningful word changes → identical, no Claude call needed
@@ -237,7 +272,7 @@ export async function compareContracts(textA: string, textB: string): Promise<ob
     (sum, r) => sum + r.textInA.length + r.textInB.length,
     0
   );
-  const changeRatio = totalChangedChars / (textA.length + textB.length);
+  const changeRatio = totalChangedChars / totalLength;
 
   // More than 25% of text changed → genuinely different contracts.
   // Fall back to full-text analysis (chunked if large).
