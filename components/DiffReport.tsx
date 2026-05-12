@@ -74,6 +74,12 @@ export function DiffReport({ data }: { data: ReportData }) {
       )}
 
       {/* Material differences */}
+      {data.material_differences && data.material_differences.length === 0 && (
+        <div className="bg-green-50 border border-green-200 rounded-xl p-6 text-center">
+          <p className="text-green-800 font-medium text-sm">No material differences found</p>
+          <p className="text-green-700 text-xs mt-1">The contracts are substantively identical in their legal terms.</p>
+        </div>
+      )}
       {data.material_differences && data.material_differences.length > 0 && (
         <div>
           <h3 className="text-sm font-semibold text-stone-500 uppercase tracking-wider mb-4">

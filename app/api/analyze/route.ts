@@ -154,6 +154,16 @@ export async function POST(request: NextRequest) {
 
         await uploadPromise;
 
+        // Reject documents that are too sparse to be real contracts
+        const wordsA = (cleanA.match(/\b[a-zA-Z]{2,}\b/g) ?? []).length;
+        const wordsB = (cleanB.match(/\b[a-zA-Z]{2,}\b/g) ?? []).length;
+        if (wordsA < 75) {
+          throw new Error(`"${fileAMeta.name}" doesn't appear to be a complete document — only ${wordsA} words extracted. Please upload the full contract.`);
+        }
+        if (wordsB < 75) {
+          throw new Error(`"${fileBMeta.name}" doesn't appear to be a complete document — only ${wordsB} words extracted. Please upload the full contract.`);
+        }
+
         console.log('[analyze:bg] comparing contracts');
         const aiResult = await compareContracts(cleanA, cleanB);
         const result = { ...(aiResult as object), _text_a: cleanA, _text_b: cleanB };
