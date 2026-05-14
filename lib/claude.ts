@@ -29,10 +29,15 @@ export async function ocrWithClaude(buffer: Buffer, mimeType: OcrMimeType): Prom
           contentItem as never,
           {
             type: 'text',
-            text: `Extract ALL text from this document exactly as written.
-Include: headings, field labels, field values, body paragraphs, dates, amounts, signatures, initials, stamps, and any handwritten annotations.
-For handwritten text: transcribe as accurately as possible; mark uncertain words with [?].
-Output only the raw extracted text in reading order — no commentary, no markdown formatting.`,
+            text: `Extract all text from this document and preserve its logical structure.
+
+Rules:
+- For form fields (printed label + written/typed value): output each field on its own line as "Label: Value". Do NOT merge values from adjacent fields that appear on the same visual row.
+- For multi-column form rows (e.g. Address | City | Province | Postal Code all on one line), treat each column as a separate field on its own line.
+- For body paragraphs and clauses: transcribe as continuous prose, one paragraph per line.
+- For handwritten or initialled text: transcribe as accurately as possible; mark uncertain words with [?].
+- Include all content: headings, labels, values, dates, amounts, signatures, stamps, annotations.
+- Output only the extracted text — no commentary, no markdown.`,
           },
         ],
       },
